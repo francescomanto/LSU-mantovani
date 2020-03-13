@@ -1,0 +1,562 @@
+---
+title: "LSU challenge MIBE"
+author: "Francesco Mantovani"
+date: "12/3/2020"
+output: html_document
+---
+## INITIAL SETTINGS
+
+
+Load and, if needed, install the following packages
+
+```{r}
+if (!require("pacman")) install.packages("pacman")
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("data.table")) install.packages("data.table")
+if (!require("formattable")) install.packages("formattable")
+if (!require("fastDummies")) install.packages("fastDummies")
+if (!require("caTools")) install.packages("caTools")
+if (!require("caret")) install.packages("caret")
+if (!require("car")) install.packages("car")
+if (!require("gridExtra")) install.packages("gridExtra")
+if (!require("corrplot")) install.packages("corrplot")
+```
+
+Load them
+
+```{r}
+library(tidyverse)
+library(formattable)
+library(data.table)
+library(fastDummies)
+library(caTools)
+library(caret)
+library(car)
+library(gridExtra)
+library(corrplot)
+library(reshape2)
+```
+
+
+Set language to english and working directory:
+
+```{r}
+Sys.setenv(LANG = "en")
+```
+
+
+Import data:
+
+```{r}
+res_url <- ("https://github.com/zampolli75/mibe-challenge/blob/master/data/resturants-mibe.rds")
+resURL <- readRDS(gzcon(url(res_url)))
+del_url <- ("https://github.com/zampolli75/mibe-challenge/blob/master/data/delivery-mibe.rds")
+delURL <- readRDS(gzcon(url(del_url)))
+```
+
+## PART 1 - RESTAURANTS INFORMATION
+
+### Top 10 neighborhoods by number of restaurants
+
+
+Check missing values:
+
+```{r}
+sapply(res, function(x) sum(is.na (x)))
+```
+
+No missing values in 'rest_neighborhood'.
+
+```{r}
+x1 <- sort(table(res$rest_neighborhood),decreasing=T)
+x1 <- x1[1:10]
+x1 <- as.data.frame(x1)
+```
+
+
+Column chart:
+
+```{r}
+x1p <- ggplot(x1, aes(x = Var1, y = Freq)) +
+  geom_bar(fill = "steelblue", stat = "identity", width=0.6) +
+  geom_text(aes(label=Freq), vjust=1.6, color="white", size=3.5) +
+  ggtitle("Top 10 neighborhoods by n° of restaurants") +
+  xlab("Neighborhood") + ylab("n° of restaurants") +      coord_cartesian(ylim=c(100,250))
+x1p
+```
+
+
+
+### Top 10 neighborhoods by restaurant review score
+
+We need to compute the average review per neighborhood for this task
+
+```{r}
+x2 <- res[!is.na(res$rest_rating),]
+x2 <- aggregate(x2[, 6], list(x2$rest_neighborhood), mean)
+x2$rest_rating <- round(x2$rest_rating, digits = 2)
+x2 <- x2[order(x2$rest_rating, decreasing = TRUE),]
+x2 <- x2[1:10,]
+```
+
+graph:
+```{r}
+x2p <- ggplot(x2, aes(x=reorder(Group.1, -rest_rating), y = rest_rating)) +
+ geom_bar(fill = "steelblue", stat = "identity", width=0.6) +
+ geom_text(aes(label=rest_rating), vjust=1.6, color="white", size=3.2) +  coord_cartesian(ylim=c(4,5)) +
+ ggtitle("Top 10 neighborhoods by average restaurant review score") +    xlab("Neighborhood") + ylab("Average review")
+x2p
+```
+
+
+### Top 10 biggest chain 
+
+For this task, two fundamentals corrections to the data have been made:
+
+1) The first result is "Gets drinks delivered". This is not a brand, but simply refers to the fact that that restaurant delivers alcholic beverages to their costumers. It shouldn't be in that column. The first result is excluded.
+
+2) The big brand Co-Operative was labeled under two names: "Co-op" and "Co-operative". It is therefore necessary to modify one, otherwise they would appear separately in the ranking.
+
+
+```{r}
+x3 <- res[!is.na(res$rest_brand),]
+x3$rest_brand[x3$rest_brand == "Co-operative"] <- "Co-op"
+x3 <- sort(table(x3$rest_brand),decreasing=T)
+x3 <- x3[2:11]
+x3 <- as.data.frame(x3)
+names(x3)[names(x3) == "Var1"] <- "Chain"
+names(x3)[names(x3) == "Freq"] <- "Number of restaurants"
+formattable(x3)
+```
+
+The final table excludes "Gets drink delivered" and gathers "Co-op" in one.
+
+
+### Average menu price and number of items
+
+
+```{r}
+avg <- res$rest_menu_item_price %>% map(mean)
+count <- res$rest_menu_item_price %>% map(length)
+res$avg <- avg
+res$count <- count
+x4 <- select(res,-c(rest_menu_item_price))
+x4 <- x4[1:10,]
+
+formattable(x4)
+```
+
+
+### Number of items on menu for 5 most expensive and 5 cheapest restaurants
+
+```{r}
+res3 <- res
+res3$avg <- as.numeric(res$avg)
+res3$count <- as.numeric(res$count)
+res3 <- select(res3,-c(rest_menu_item_price))
+res3 <- as.data.frame(res3)
+res3 <- res3[order(res3[, 7], decreasing = T), ]
+res3 <- res3[!is.na(res3$avg),]
+res3 <- res3[!grepl("Catering", res3$rest_name),]
+top5 <- res3[2:6,]
+top5[1, 2] = "Attilus\nCaviar"
+top5[2, 2] = "Radio\nAlice"
+top5[3, 2] = "Organic\nPress"
+top5[4, 2] = "Kenza"
+top5[5, 2] = "Levant"
+
+bot5 <- top_n(res3, -5, wt=avg)
+bot5 <- bot5[1:5,]
+bot5[1, 2] = "Little\nMoons Soho"
+bot5[2, 2] = "LittleMoons\nMayfair"
+bot5[3, 2] = "Metro Coffe\nExpress"
+bot5[4, 2] = "Snow\nBallz"
+bot5[5, 2] = "Bambusa\nFitzrovia"
+```
+
+
+```{r}
+p <- ggplot(top5, aes(x =reorder(rest_name, -count), y = count)) +
+    geom_bar(fill = "red", stat = "identity", width=0.6) +
+    geom_text(aes(label=count), vjust=-0.3, color="black", size=3.2)+     ylab("Items on Menu") + xlab("most expensive")
+q <- ggplot(bot5, aes(x =reorder(rest_name, -count), y = count)) +
+        geom_bar(fill = "steelblue", stat = "identity", width=0.6) +
+        geom_text(aes(label=count), vjust=-0.3, color="black",       size=3.2) + ylab("") + xlab("cheapest")
+
+test <- grid.arrange(p, q, nrow =1,
+top="Number of Items in menu for Most expensive and Cheapest restaurants in London", 
+bottom= "Restaurant Name")
+```
+
+
+
+
+## PART 2 - RESTAURANTS DELIVERY TIMES
+
+Before going on with the questions, let's merge the two datasets.
+
+Firstly drop rows where delivery time is Na. Why? Because if there is no delivery time, it's reasonable to assume that that restaurant doesn't deliver to that neighorhood. 
+
+```{r}
+del <- del[!is.na(del$rest_delivery_time_min),]
+names(del)[names(del) == "rest_key"] <- "restaurant_id"
+merged <- merge(res, del, by= "restaurant_id")
+```
+
+
+### Count number of neighborhoods where each restaurant deliver.
+
+```{r}
+x6 <- data.table(merged)
+x6 <- x6[, .(res_neigh_count = uniqueN(neighborhood_name)),
+        by = restaurant_id]
+x6t <- x6[1:5,]
+formattable(x6t)
+```
+
+The number of neighborhoods to which each restaurant delivers is shown with an example of first five restaurants, identified by their ID. 
+
+
+### Top 15 neighborhoods by number of restaurants where restaurants make deliveries.
+
+```{r}
+x7 <- data.table(merged)
+x7 <- x7[, .(res_count = uniqueN(restaurant_id)), by = neighborhood_name]
+x7 <- x7 [order(x7$res_count, decreasing = TRUE),]
+x7 <- x7[1:15,]
+
+#Put \n in between names for better visualization 
+x7$neighborhood_name <- c("tottehnham\ncourt\nroad", "regent's\npark",  "fitzrovia", "mortimer\nstreet", "mayfair", "marylebone", "berners\nstreet", "goodge\nstreet", "charlotte\nstreet", "soho", "st james'", "leicester\nsquare", "euston", "bloomsbury","covent\ngarden")
+```
+
+ 
+```{r}
+x7p <- ggplot(x7, aes(x = reorder(neighborhood_name, -res_count), y = res_count)) +
+geom_bar(fill = "steelblue", stat = "identity", width=0.6) +
+geom_text(aes(label=res_count), vjust=-0.3, color="black", size=3.2) +
+ylab("N of estaurants delivering to..") + xlab("Neighborhood") +
+coord_cartesian(ylim=c(350,550))
+x7p
+```
+
+
+### Average delivery time for each restaurant.
+
+```{r}
+x8 <- aggregate(rest_delivery_time_min~restaurant_id, merged, mean)
+x8$rest_delivery_time_min <- round(x8$rest_delivery_time_min, digits = 2)
+names(x8)[names(x8) == "rest_delivery_time_min"] <- "avg_del_time"
+x8t <- x8[1:5,]
+formattable(x8t)
+```
+
+Average delivery time for the first five restaurants, identified by their ID, is shown with this table.
+
+
+### Top 20 restaurants by faster average delivery time.
+
+```{r}
+x9 <- merge(res, x8, by= "restaurant_id")
+x9 <- x9 [order(x9$avg_del_time),]
+myvars <- c("restaurant_id", "rest_name", "rest_postcode", "avg_del_time", "rest_rating")
+x9 <- x9[myvars]
+x9 <- x9[1:20,]
+row.names(x9) <- NULL
+names(x9)[names(x9) == "restaurant_id"] <- "Rest ID"
+names(x9)[names(x9) == "rest_name"] <- "Rest Name"
+names(x9)[names(x9) == "rest_postcode"] <- "Rest Postcode"
+names(x9)[names(x9) == "avg_del_time"] <- "Average delivery time"
+names(x9)[names(x9) == "rest_rating"] <- "Rest Rating"
+formattable(x9)
+```
+
+
+\n
+\n
+\n
+\n
+\n
+
+## PART 3 - OPEN ANALYSIS
+
+### Business context
+The goal of the following analysis is to understand more of restaurant's ratings and what factor influence them. 
+With the rise of the internet, customers review and share their experiences on websites like Yelp and Tripadvisor, therefore greatly influencing future costumers.
+It was recently found *note1 that restaurants that increased their ratings by one star (1.0 points) increased their revenue of an average of 5%-9%. 
+Let's see if it's possible to understand more about these ratings!
+
+
+
+Put all data in one dataframe:
+
+```{r}
+res1 <- merge(res, x8, by= "restaurant_id")
+res1 <- merge(res1, x6, by= "restaurant_id")
+res1 <- select(res1,-c(rest_postcode, rest_menu_item_price))
+res1$avg <- as.numeric(res1$avg)
+res1$count <- as.numeric(res1$count)
+names(res1)[names(res1) == "avg"] <- "avg_menu_price"
+names(res1)[names(res1) == "count"] <- "items_count"
+```
+
+'res_postcode' has been dropped because in England postcodes are really precise, representative of the exact location. Having that variable is similar to having another ID.    
+'rest_menu_item_price' has been dropped because the relevant info contained in it are reported in variables 'avg_menu_price' and 'items_count'. 
+
+
+
+Check missing values:
+
+```{r}
+summary(res1)
+```
+
+Delete NAs in dependet variable and 1 NA in 'avg_menu_price' (two different methods):
+
+```{r}
+res1 <- res1[complete.cases(res1[ ,5]),]
+res1 <- res1[!is.na(res1$avg_menu_price),]
+```
+
+
+Modify 'rest_brand' variable. Create dummy variable =1 if restaurant is part of a chain, =0 else.
+And code=0 those variables with "gets drinks delivered"
+
+```{r}
+res1$rest_brand[!is.na(res1$rest_brand)] <- "1"
+res1$rest_brand[is.na(res1$rest_brand)] <- "0"
+res1$rest_brand[res1$rest_brand == "Get drinks delivered"] <- "0"
+res1$rest_brand <- as.numeric(res1$rest_brand)
+```
+
+
+### Correlation matrix!
+
+```{r}
+res5 <- res1
+res5 <- select(res5,-c(restaurant_id, rest_name, rest_neighborhood))
+
+res_cor <- cor(res5)
+
+melted_res_cor <- melt(res_cor)
+
+heatmap11 <- ggplot(data = melted_res_cor, aes(Var2, Var1, fill = value))+
+   geom_tile(color = "white")+
+   scale_fill_gradient2(low = "black", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab") +
+   theme_minimal()+ ylab("") + xlab("") +
+   theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+   size = 12, hjust = 1))+
+   coord_fixed()
+
+heatmap11
+```
+
+Some variables appear to be correlated to 'rest_rating'. 
+Firstly, 'average delivery time' seems negatively correlated with a value of -0,321 circa. 'avg_menu_price' and 'rest_brand' show a moderate positive correlation.
+
+
+```{r}
+p7 <- ggplot(res5, aes(x=avg_del_time, y = rest_rating)) +
+      geom_point() +
+      ylab("Rating") + xlab("Average delivery time")
+p7
+```
+
+From the scatter plot, the negative correlation is slightly visibile.
+
+Let's clean the data a bit more:
+
+```{r}
+boxplot(res5$items_count, data=res5)
+```
+
+There appear to be some ouliers. They are identified by the points outside the wiskers of the boxplot.
+Remove manually the ones that could derive from errors in measurements. For Example, it's unlikely that a restaurant has more then 600 items on the menu.
+
+```{r}
+res5 <- res5[res5$avg_del_time < 80,]
+res5 <- res5[res5$items_count < 600,]
+res5 <- res5[res5$res_neigh_count < 50,]
+```
+
+Scatter plot of 'delivery time' vs 'rating', after correcting outliers and including variable 'rest_brand':
+
+```{r}
+p5 <- ggplot(res5, aes(x=avg_del_time, y = rest_rating)) +
+      geom_point(aes(color = factor(rest_brand))) + 
+      coord_cartesian(ylim=c(3,5), xlim=c(5,80)) +
+      ylab("Rating") + xlab("Average delivery time")
+p5
+```
+
+Again, the negative correlation is not that clear, and the variable 'rest_brand' do not highlight any cluster.
+
+
+
+Let's try some linear regression.
+
+Split train and test data leaving 25% of data for testing:
+
+```{r}
+set.seed(5)
+sample1 = sample.split(res5, SplitRatio = .75)
+train1 = subset(res5, sample1 == TRUE)
+test1  = subset(res5, sample1 == FALSE)
+```
+
+
+Train first model:
+
+```{r}
+lm1 <- lm(rest_rating~.,data=train1)
+summary(lm1)
+predictions1 <- lm1 %>% predict(test1)
+```
+
+
+RMSE and R2 for model 1:
+
+```{r}
+data.frame(
+ RMSE_1 = RMSE(predictions1, test1$rest_rating),
+ R2_1 = R2(predictions1, test1$rest_rating)
+ )
+```
+
+Predictive power of the model is not very high, but is significat. All the coefficients are significant.
+
+Let's try to include the qualitative variable "rest_neighborhood". To use it, it's necessary to turn its values into a series of dummies and drop the first to avoid perfect multicollinearity.
+
+
+
+Turn categorical variable "rest_neighborhood" to dummy
+
+```{r}
+
+
+
+res6 <- dummy_cols(res1, select_columns = "rest_neighborhood",
+            remove_first_dummy = TRUE)
+res6 <- select(res6,-c(rest_neighborhood, rest_name, restaurant_id))
+```
+
+
+Remove again the outliers
+
+```{r}
+res6 <- res6[res6$avg_del_time < 80,]
+res6 <- res6[res6$items_count < 600,]
+res6 <- res6[res6$res_neigh_count < 50,]
+```
+
+Linear regression, model 2:
+
+```{r}
+set.seed(321)
+sample2 = sample.split(res6, SplitRatio = .75)
+train2 = subset(res6, sample2 == TRUE)
+test2  = subset(res6, sample2 == FALSE)
+```
+
+```{r}
+lm2 <- lm(rest_rating~.,data=train2)
+summary(lm2)
+predictions2 <- lm2 %>% predict(test2)
+```
+
+
+RMSE and R2 for model 2:
+
+```{r}
+data.frame(
+ RMSE_2 = RMSE(predictions2, test2$rest_rating),
+ R2_2 = R2(predictions2, test2$rest_rating)
+ )
+```
+
+
+
+The variables deriving from 'rest_neighborhoods' positevely impacted R2. Of course, it has to be considered that r2 is very sentitive to the number of variables included, so it's better to look at Adj R2.
+The statistical significance of original variables were not impacted by taking into account the new ones.
+
+
+Let's train again the model without the non-significant variables (i.e. those with a p-value>0.05) . 
+
+Remove non-significant variables:
+
+```{r}
+res7 <- select(res6,-c(rest_neighborhood_Battersea, `rest_neighborhood_Bethnal Green`, `rest_neighborhood_Brick Lane`, rest_neighborhood_Brixton, `rest_neighborhood_Canary Wharf`, rest_neighborhood_Clapham, rest_neighborhood_Dalston, rest_neighborhood_Ealing, rest_neighborhood_Hammersmith, rest_neighborhood_Harringay, rest_neighborhood_Kingston, rest_neighborhood_Peckham, rest_neighborhood_Putney, rest_neighborhood_Tooting, `rest_neighborhood_Shepherd's Bush`, rest_neighborhood_Wandsworth, rest_neighborhood_Wimbledon))
+```
+
+
+Model 3:
+
+```{r}
+set.seed(456)
+sample3 = sample.split(res7, SplitRatio = .75)
+train3 = subset(res7, sample3 == TRUE)
+test3  = subset(res7, sample3 == FALSE)
+```
+
+```{r}
+lm3 <- lm(rest_rating~.,data=train3)
+summary(lm3)
+predictions3 <- lm3 %>% predict(test3)
+```
+
+
+RMSE and R2 for model 3:
+
+```{r}
+data.frame(
+ RMSE_3 = RMSE(predictions3, test3$rest_rating),
+ R2_3 = R2(predictions3, test3$rest_rating)
+ )
+```
+Dropping non-significant variables has reduced test-R2 but is more appropriate because it reduced noise. 
+
+
+VIF can be used to assess whether there is correlation between independent variables. 
+
+```{r}
+vif3 <- car::vif(lm3)
+vif3 <- as.data.frame(vif3)
+head(vif3)
+```
+
+head shows only the first 6 ones, but by checking the entire vif6 df it's clear there is no correlation between explanatory variables (multicollinearity exists when a var. has VIF>5)
+
+
+RESULTS INTERPRETATION
+
+The first variable that drew our attention was 'average delivery time'. It is indeed statistically significant and has a coefficient of -6.51e^-3, which is equal to -0.3243. This means that for every additional unit of delivery time, the rating decreases on average of 0.3243 points. 
+Delivery time is important!!
+
+Another finding is that more expensive restaurants have better ratings. The interpretation of the 8.196e-03 coefficient is similar to the previous: for a unit increase in the mean price of items on menu, the rating will increase on average by 0.4081 points.
+
+Restaurants location matters too. By creating a binary value for each neighborhood in which restaurants are located, it was possible to determine whether location influences rating. But interpretation of coefficients is different: the results are measured in terms of the category of reference (the one dummy dropped), in this case the neighborhood Balham. So if a restaurant is located in Hendon, it has on average a rating 0.9465 (=6.994e-02) points lower then a restaurant located in Balham.
+
+RESIDUALS VS FITTED PLOT
+
+```{r}
+fitted3 <- lm3 %>% predict(train3)
+residuals3 <-   resid(lm3)
+
+
+plot(fitted3, residuals3)
+```
+
+By looking at the above plot, we can deduct that the relationship in the data is not perfectly linear and that there is a sign of heteroskedasticy - variance in residuals in not constant.
+The two major consequences of heteroskedasticy are that coefficients are biased , i.e. not being the best estimators, and that standard errors can be incorrect. 
+Since the main focus of this analysis is to get insights from data to drive business decisions, and not to have perfect predictors, it makes sense not to further question this problem and just be aware that coefficients are not exactly perfect.
+
+
+### CONCLUSIONS
+
+So far, we can say that delivery time is an important factor and restaurants should focus on diminish it as much as possible to have better reviews. If a restaurant wants to have a strong digital presence, and therefore firmly rely on the importance of reviews, it should position itself as a higher-end venue, as more expensive restaurants appear to have better ratings. 
+Location should be questioned too. 
+Being part of a brand is also positively impacting reviews. This is another factor that a food-entrepeneur should take into consideration if unsure, for example, on whether to go franchising.
+
+
+
+*note1: https://modernrestaurantmanagement.com/the-impact-of-reviews-on-the-restaurant-market-infographic/
