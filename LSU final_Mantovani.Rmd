@@ -1,0 +1,491 @@
+---
+title: "Food delivery scene in London 2021"
+author: "Francesco Mantovani"
+date: "3/9/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+
+```
+
+
+
+
+```
+```
+
+
+```
+```
+Check for presence of necessary packages and install missing ones.
+Open necessary packages.
+Make sure system language is set to english 
+
+```{r}
+if (!require("pacman")) install.packages("pacman")
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("data.table")) install.packages("data.table")
+if (!require("formattable")) install.packages("formattable")
+if (!require("fastDummies")) install.packages("fastDummies")
+if (!require("caTools")) install.packages("caTools")
+if (!require("caret")) install.packages("caret")
+if (!require("car")) install.packages("car")
+if (!require("gridExtra")) install.packages("gridExtra")
+if (!require("corrplot")) install.packages("corrplot")
+
+
+library(tidyverse)
+library(formattable)
+library(data.table)
+library(fastDummies)
+library(caTools)
+library(caret)
+library(car)
+library(gridExtra)
+library(corrplot)
+library(reshape2)
+library(tinytex)
+library(knitr)
+
+Sys.setenv(LANG = "en")
+```
+
+
+Read databases & visualize data
+
+```{r}
+res <- readRDS("resturants-mibe.rds")
+del <- readRDS("delivery-mibe.rds")
+
+```
+
+```{r}
+res[1:5,]
+```
+
+```{r}
+del[1:5,]
+```
+
+
+## Part 1 - Restaurants Information
+
+# 1) Top 10 neighborhoods by number of restaurants
+
+Check for missing values:
+
+```{r}
+sapply(res, function(x) sum(is.na (x)))
+```
+
+No missing values in Neighborhoods column (all restaurant have indicated their neighborhood)
+
+Column Chart
+
+```{r}
+x1 <- sort(table(res$rest_neighborhood),decreasing=T)
+x1 <- x1[1:10]
+x1 <- as.data.frame(x1)
+
+x1p <- ggplot(x1, aes(x = Var1, y = Freq)) +
+ geom_bar(fill = "steelblue", stat = "identity", width=0.6) +
+ geom_text(aes(label=Freq), vjust=1.6, color="white", size=3.5) +
+ ggtitle("Top 10 neighborhoods by n° of restaurants") +
+ xlab("Neighborhood") + ylab("n° of restaurants") + coord_cartesian(ylim=c(100,250))
+x1p
+```
+
+
+# 2) Top 10 neighborhoods by number restaurant review score
+
+Let's check for missing values first and then compute the average review per neighborhood 
+
+```{r}
+x2 <- res[!is.na(res$rest_rating),]
+x2 <- aggregate(x2[, 6], list(x2$rest_neighborhood), mean)
+x2$rest_rating <- round(x2$rest_rating, digits = 2)
+x2 <- x2[order(x2$rest_rating, decreasing = TRUE),]
+x2 <- x2[1:10,]
+
+x2p <- ggplot(x2, aes(x=reorder(Group.1, -rest_rating), y = rest_rating)) +
+ geom_bar(fill = "steelblue", stat = "identity", width=0.6) +
+ geom_text(aes(label=rest_rating), vjust=1.6, color="white", size=3.2) + coord_cartesian(ylim=c(4,5)) +
+ ggtitle("Top 10 neighborhoods by average restaurant review score") + xlab("Neighborhood") + ylab("Average rev
+iew")
+x2p
+
+```
+
+
+# 3) Top 10 Chains by number of restaurants
+
+For this task, two fundamentals corrections to the data have been made:
+1. The first result is “Gets drinks delivered”. This is not a brand, but simply refers to the fact that that restaurant delivers alcholic beverages to
+their costumers. It shouldn’t be in that column. The first result is excluded.
+2. The big brand Co-Operative was labeled under two names: “Co-op” and “Co-operative”. It is therefore necessary to modify one, otherwise
+they would appear separately in the ranking.
+
+```{r}
+x3 <- res[!is.na(res$rest_brand),]
+x3$rest_brand[x3$rest_brand == "Co-operative"] <- "Co-op"
+x3 <- sort(table(x3$rest_brand),decreasing=T)
+x3 <- x3[2:11]
+x3 <- as.data.frame(x3)
+names(x3)[names(x3) == "Var1"] <- "Chain"
+names(x3)[names(x3) == "Freq"] <- "Number of restaurants"
+x3
+```
+
+The final table excludes “Gets drink delivered” and gathers “Co-op” in one.
+
+
+# 4) Average menu price and number of items
+
+```{r}
+avg <- res$rest_menu_item_price %>% map(mean)
+count <- res$rest_menu_item_price %>% map(length)
+res$avg <- avg
+res$count <- count
+x4 <- select(res,-c(rest_menu_item_price))
+x4 <- x4[1:10,]
+x4
+```
+
+# 5) Number of menu items for 5 most expensive and cheapest restaurants
+
+
+```{r}
+res3 <- res
+res3$avg <- as.numeric(res$avg)
+res3$count <- as.numeric(res$count)
+res3 <- select(res3,-c(rest_menu_item_price))
+res3 <- as.data.frame(res3)
+res3 <- res3[order(res3[, 7], decreasing = T), ]
+res3 <- res3[!is.na(res3$avg),]
+res3 <- res3[!grepl("Catering", res3$rest_name),]
+top5 <- res3[2:6,]
+top5[1, 2] = "Attilus\nCaviar"
+top5[2, 2] = "Radio\nAlice"
+top5[3, 2] = "Organic\nPress"
+top5[4, 2] = "Kenza"
+top5[5, 2] = "Levant"
+bot5 <- top_n(res3, -5, wt=avg)
+bot5 <- bot5[1:5,]
+bot5[1, 2] = "Little\nMoons Soho"
+bot5[2, 2] = "LittleMoons\nMayfair"
+bot5[3, 2] = "Metro Coffe\nExpress"
+bot5[4, 2] = "Snow\nBallz"
+bot5[5, 2] = "Bambusa\nFitzrovia"
+
+p <- ggplot(top5, aes(x =reorder(rest_name, -count), y = count)) +
+ geom_bar(fill = "red", stat = "identity", width=0.6) +
+ geom_text(aes(label=count), vjust=-0.3, color="black", size=3.2)+ ylab("Items on Menu") + xlab("most expe
+nsive")
+q <- ggplot(bot5, aes(x =reorder(rest_name, -count), y = count)) +
+ geom_bar(fill = "steelblue", stat = "identity", width=0.6) +
+ geom_text(aes(label=count), vjust=-0.3, color="black", size=3.2) + ylab("") + xlab("cheapest")
+test <- grid.arrange(p, q, nrow =1,
+top="Number of Items in menu for Most expensive and Cheapest restaurants in London", 
+bottom= "Restaurant Name")
+```
+
+
+## Part 2 - Restaurants Delivery Times
+
+The second dataset contains a large amount of data with three features: restaurant Id, Neighborhood name and Delivery time. 
+
+No extra information is provided.
+
+Since restaurants Id appear more then once, we assume that each record represent a delivery that restaurant has made.
+
+We drop rows with null values in "rest_delivery_time_min" and merge the two data sets.
+
+```{r}
+del <- del[!is.na(del$rest_delivery_time_min),]
+names(del)[names(del) == "rest_key"] <- "restaurant_id"
+merged <- merge(res, del, by= "restaurant_id")
+```
+
+# 6) Count number of neighborhoods where each restaurant deliver.
+
+```{r}
+x6 <- data.table(merged)
+x6 <- x6[, .(res_neigh_count = uniqueN(neighborhood_name)),
+ by = restaurant_id]
+x6t <- x6[1:5,]
+
+x6t
+
+```
+
+Object x6 contains a table where the number of different neighborhoods to which each restaurant delivers. 
+
+Object x6t is a table where only 5 restaurants are reported to give a visual example.
+
+# 7) Top 15 neighborhoods by restaurant delivery time
+
+
+```{r}
+x7 <- data.table(merged)
+x7 <- x7[, .(res_count = uniqueN(restaurant_id)), by = neighborhood_name]
+x7 <- x7 [order(x7$res_count, decreasing = TRUE),]
+x7 <- x7[1:15,]
+
+#Put \n in between names for better visualization 
+x7$neighborhood_name <- c("tottehnham\ncourt\nroad", "regent's\npark", "fitzrovia", "mortimer\nstreet", "mayfai
+r", "marylebone", "berners\nstreet", "goodge\nstreet", "charlotte\nstreet", "soho", "st james'", "leicester\nsqua
+re", "euston", "bloomsbury","covent\ngarden")
+
+x7p <- ggplot(x7, aes(x = reorder(neighborhood_name, -res_count), y = res_count)) +
+geom_bar(fill = "steelblue", stat = "identity", width=0.6) +
+geom_text(aes(label=res_count), vjust=-0.3, color="black", size=3.2) +
+ylab("N of estaurants delivering to..") + xlab("Neighborhood") +
+coord_cartesian(ylim=c(350,550))
+
+x7p
+```
+
+
+# 8) Compute average Delivery time per restaurant
+
+```{r}
+x8 <- aggregate(rest_delivery_time_min~restaurant_id, merged, mean)
+x8$rest_delivery_time_min <- round(x8$rest_delivery_time_min, digits = 2)
+names(x8)[names(x8) == "rest_delivery_time_min"] <- "avg_del_time"
+x8t <- x8[1:5,]
+
+x8t
+```
+
+x8 is a table comprehensive of all restaurants and their respective delivery times.
+x8t is a short table reporting an example of first five restaurants
+
+
+# 9) Report a table with top 20 restaurants by average delivery time.
+
+```{r}
+
+x9 <- x8[order(x8$avg_del_time),]
+x9 <- merge(res, x9, by = 'restaurant_id')
+res2 <- x9
+myvars <- c("restaurant_id", "rest_name", "rest_postcode", "avg_del_time", "rest_rating")
+x9 <- x9[myvars]
+x9 <- x9[1:20,]
+row.names(x9) <- NULL
+names(x9)[names(x9) == "restaurant_id"] <- "Rest ID"
+names(x9)[names(x9) == "rest_name"] <- "Rest Name"
+names(x9)[names(x9) == "rest_postcode"] <- "Rest Postcode"
+names(x9)[names(x9) == "rest_rating"] <- "Rest Rating"
+
+x9
+```
+
+It's interesting to notice how most restaurants among the faster deliverers are part of chains.
+
+
+## Part 3 - Open analysis
+
+Business Context: 
+
+Food delivery has been a growing trend for the past several years and faced a steep acceleration since the pandemic hit.
+We see delivery apps booming, restaurants change their business model and the birth of innovative food-service solutions like "Dark Kitchen". 
+
+Food delivery growth might not stop anytime soon, but the market has already been flooded with new players. 
+Is there potential for new entrants? 
+What can current players (both food delivery services and restaurants) do to keep growing, foster innovation and defend from competition?
+
+Through this analysis, we investigate what factors are the most relevant for businesses in the field and what they should work on to improve their service.
+
+According to the available data, 3 major business questions were identified. 
+
+# 1) Does delivery time impacts ratings?
+
+Restaurants ratings, provided through apps such as Yelp, TripAdvisor or Google Reviews, are extremely important in nowadays digital work.
+A recent study found that a 1/2 star increase resulted in a 30-40 percent increase in 7pm bookings, while a 1 star increase could result in up to 9% in revenue.
+
+Understanding what factors impact ratings can help businesses to improve their services and ultimately increase revenues. 
+Since nowadays most deliveries are operated by third-party services (mostly delivery apps), such insights might be useful also for them.
+
+The first hypothesis is that delivery time significantly impacts ratings.
+
+
+```{r}
+
+summary(res$rest_rating)  
+res2 <- res2[!is.na(res$rest_rating),] 
+
+p7 <- ggplot(res2, aes(x=avg_del_time, y = rest_rating)) +
+     geom_point() +
+     ylab("Rating") + xlab("Average delivery time")
+p7
+
+```
+
+A very slight negative correlation might be noticed in the graph.
+Let's summarize data to try and have a closer look. We compute average delivery time per rating level.
+
+```{r}
+x10 <- aggregate(avg_del_time~rest_rating, res2, mean)
+p8 <- ggplot(x10, aes(x=avg_del_time, y = rest_rating)) +
+      geom_point() +
+      ylab("Rating") + xlab("Average delivery time")
+p8
+```
+
+Here the negative correlation appear significantly more evident. 
+But since size of clusters and other variables were not taken into account, we can state that our hypothesis is stronger, but it's early to reach any conclusion though. Let's continue our analysis and come back to this question later. 
+
+# 2) Does reach improve ratings? 
+
+Reach of delivery (number of different locations to which each restaurant delivers) is for sure a very important factor in home deliveries. The more destinations available, the more consumers will consider the restaurant as an option, therefore the more orders opportunities.
+
+```{r}
+x111 <- aggregate(neighborhood_name~restaurant_id, merged, uniqueN)
+names(x111)[names(x111) == "neighborhood_name"] <- "neigh_count"
+res2 <- merge(res2, x111, by = 'restaurant_id') #count how many neighbours to which each restaurant delivers
+
+#Plot
+plot_neighcount <- ggplot(res2, aes(x=neigh_count, y = rest_rating)) +
+      geom_point() +
+      ylab("Rating") + xlab("# of neighbours delivered to")
+
+plot_neighcount
+```
+
+It's very hard to spot a trend in this scatter plot. 
+Let's try to summarize data by dividing distribution of neighborhoods in quartiles and see average rating per quartile.
+
+```{r}
+#divide quartiles
+
+first_quart <- filter(res2, neigh_count <3)
+first_quart <- first_quart[!is.na(first_quart$rest_rating),]
+
+sec_quart <- filter(res2, neigh_count <6 | neigh_count >3)
+sec_quart <- sec_quart[!is.na(sec_quart$rest_rating),]
+
+ter_quart <- filter(res2, neigh_count >6 | neigh_count <13)
+ter_quart <- ter_quart[!is.na(ter_quart$rest_rating),]
+
+quar_quart <- filter(res2, neigh_count>13)
+quar_quart <- quar_quart[!is.na(quar_quart$rest_rating),]
+
+#Create summary table
+quartile <- c(1, 2, 3, 4)
+range <- c(" 1 (<3)", "2 (3-6)", "3 (6-13)", "4 (13+)" )
+avg_rating <- c(mean(first_quart$rest_rating), mean(sec_quart$rest_rating), mean(ter_quart$rest_rating), mean(quar_quart$rest_rating))
+quartiles <- data.frame(quartile, range, avg_rating)
+quartiles$avg_rating <- round(quartiles$avg_rating, digits = 2)
+
+```
+
+
+```{r}
+p_prova <- ggplot(quartiles, aes(x = range, avg_rating), y = avg_rating)+
+            geom_bar(fill = "red", stat = "identity", width=0.6) +
+            coord_cartesian(ylim=c(4.2, 4.6)) +
+            geom_text(aes(label=avg_rating), vjust=-0.3, color="black", size=5)+ ylab("Average Rating") + xlab("Quartile")
+p_prova
+```
+
+
+
+By dividing the distribution in quartiles and computing the average rating for each, we can see relevant differences. 
+Again, we keep this result on hold for the moment. We will soon test the significance of such finding.
+
+# 3) Number of deliveries
+
+Restaurant's results can be measured by counting the total number of deliveries made. 
+We do not have details about the time frame in which delieveries occurred, but looking at descriptive statistics we can resonably assume a time frame of a single day. Even if time frame is just as assumption, it will be the same for all records.
+
+To answer this question, we first create a definitive dataframe with all necessary information, and there directly apply multiple linear regression to study coeffients significancy
+
+```{r}
+del_numb <- sort(table(merged$restaurant_id), decreasing=TRUE)
+del_numb <- as.data.frame(del_numb)
+del_numb_table <- del_numb[1:10,]
+
+names(del_numb)[names(del_numb) == "Freq"] <- "deliveries"
+names(del_numb)[names(del_numb) == "Var1"] <- "restaurant_id"
+complete <- merge(res, del_numb, key='restaurant_id') #add deliveries column
+complete <- merge(complete, x8, by='restaurant_id') #add avg_del_time column
+
+#change rest_brand to dummy
+complete$rest_brand[!is.na(complete$rest_brand)] <- "1"
+complete$rest_brand[is.na(complete$rest_brand)] <- "0"
+complete$rest_brand[complete$rest_brand == "Get drinks delivered"] <- "0"
+complete$rest_brand <- as.numeric(complete$rest_brand)
+
+#remove unuseful variables, rename existing ones
+complete <- merge(complete, x111, by='restaurant_id') #add neighboord count column
+rownames(complete) <- complete$restaurant_id
+names(complete)[names(complete) == "avg"] <- "average_item_cost"
+names(complete)[names(complete) == "count"] <- "items_on_menu"
+complete$average_item_cost <- as.numeric(complete$average_item_cost)
+complete$items_on_menu <- as.numeric(complete$items_on_menu)
+complete <- select(complete, -c(restaurant_id, rest_name, rest_postcode, rest_neighborhood, rest_menu_item_price))
+complete <- complete[!is.na(complete$rest_rating),]
+complete[1:5,]
+```
+
+
+To follow the order of business questions, we first compute linear regression using ratatings as dependent variable. 
+We go back to number of deliveries in a moment.
+
+# What impacts ratings?
+
+```{r}
+lmRatings = lm(rest_rating~rest_brand + neigh_count + avg_del_time + deliveries + items_on_menu + average_item_cost, data = complete) #Create a linear regression with two variables
+summary(lmRatings) #Review the results
+```
+COMMENT: all coefficients are significant (pvalue < 0.001), meaning that there is statistical evidence to affirm correlation among dependent and independent variables.
+
+rest_brand, neigh_count and avg_del_time have high B values.
+A one unit negative change in delivery time results in an average increase of 0.14 rating points.
+A one unit change in average item cost results in an average increase of 0.15 rating points.
+
+
+# What impacts number of orders?
+
+
+```{r}
+lmOrders = lm(deliveries~rest_brand + rest_rating + avg_del_time + neigh_count + items_on_menu + average_item_cost, data = complete) #Create a linear regression with two variables
+summary(lmOrders)
+```
+ 
+All coefficients are significant (pvalues < 0.05). This means that all variables are correlated with the dependent variable. 
+Ratings appear to be negatively correlated to the number of deliveries. This is unexpected, since one would assume that higher ratings could drive more orders. This can be explained by the growing use of delivery apps, where cousine type and delivery time are the biggest drivers of choice.
+Indeed, delivery time appears to be negatively correlated to number of deliveries.
+Being part of a brand significantly impacts the number of deliveries: about +1.25 on average.
+Ultimately, delivery reach (number of neighbours in which the restaurant delivers) appears to have the biggest impact on number of orders: +3.72 for a unit increase in average number of neighbors.
+
+
+#Takeaways
+
+Initial hypothesis are confirmed:
+
+RATINGS: 
+
+- Delivery times have a significant negative impact on ratings
+- Reach has a significant (but small) impact on ratings
+and...
+- Being part of a chain significantly impacts ratings
+
+NUMBER OF ORDERS: 
+
+- Delivery times have a slight negative impact on number of orders
+- Reach has a significant positive impact on number of orders
+and...
+- Being part of a chain significantly impacts number of orders.
+
+
+
+
